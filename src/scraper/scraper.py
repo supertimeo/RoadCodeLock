@@ -7,12 +7,18 @@ from typing import cast, Any
 from uuid import uuid4
 
 from playwright.sync_api import sync_playwright, Page
+from pydantic.dataclasses import dataclass
 from selectolax.parser import HTMLParser, Node
 
 scripts_folder = Path(__file__).resolve().parent / "scripts"
 
 image_fetcher_script = (scripts_folder / "image_fetcher.js").read_text()
 watch_fetcher_script = (scripts_folder / "watch_fetcher.js").read_text()
+
+@dataclass(frozen=True)
+class InitializationData:
+    quizz_url: str
+
 
 def fetch_data(page: Page) -> dict[str, Any]:
     page_locator = page.locator("iframe[title=\"Je repasse le code\"]").content_frame
@@ -82,13 +88,13 @@ def init_args() -> argparse.Namespace:
     return arg_parser.parse_args()
 
 
-def init() -> str:
+def init() -> InitializationData:
     args = init_args()
-    return args.quizz_url
+    return InitializationData(quizz_url=args.quizz_url)
 
 
 def main():
-    quizz_url = init()
+    initialization_data = init()
 
     dataset = []
 
@@ -96,7 +102,7 @@ def main():
         browser = p.chromium.launch(headless=False)
         page = browser.new_page()
 
-        page.goto(quizz_url)
+        page.goto(initialization_data.quizz_url)
 
         # Attendre que le contenu soit généré
         page.locator("iframe[title=\"Je repasse le code\"]").content_frame.locator("div#choice-1.choice[role='button']").click()
