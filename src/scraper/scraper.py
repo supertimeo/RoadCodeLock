@@ -1,6 +1,7 @@
 import json
 import re
 import time
+from pathlib import Path
 from typing import cast, Any
 from uuid import uuid4
 
@@ -8,6 +9,11 @@ from playwright.sync_api import sync_playwright, Page
 from selectolax.parser import HTMLParser, Node
 
 QUIZZ_URL = "https://www.securite-routiere.gouv.fr/les-medias/nos-quiz/je-repasse-le-code"
+
+scripts_folder = Path(__file__).resolve().parent / "scripts"
+
+image_fetcher_script = (scripts_folder / "image_fetcher.js").read_text()
+watch_fetcher_script = (scripts_folder / "watch_fetcher.js").read_text()
 
 def fetch_data(page: Page) -> dict[str, Any]:
     page_locator = page.locator("iframe[title=\"Je repasse le code\"]").content_frame
@@ -30,43 +36,12 @@ def fetch_data(page: Page) -> dict[str, Any]:
     media_container_locator = quizz_locator.locator("div#media-container")
 
     if (question_img_locator := media_container_locator.locator("img#question-img")).count():
-        question_media = question_img_locator.evaluate("""
-                                                                                            async img => {
-                                                                                                const response = await fetch(img.src);
-                                                                                                return Array.from(new Uint8Array(await response.arrayBuffer()));
-                                                                                            }
-                                                                                            """)
+        question_media = question_img_locator.evaluate(image_fetcher_script)
         question_media_name = f"{uuid4().hex}.webp"
         is_img = True
     else:
         # noinspection bad-argument-type
-        question_media = media_container_locator.locator("video#video").evaluate("""
-                                                                                                                async (video) => {
-                                                                                                                const stream = video.captureStream();
-                                                                                                                const recorder = new MediaRecorder(stream);
-                                                                                                                const chunks = [];
-                                                                                                            
-                                                                                                                return await new Promise((resolve, reject) => {
-                                                                                                                    recorder.ondataavailable = e => {
-                                                                                                                        if (e.data.size > 0)
-                                                                                                                            chunks.push(e.data);
-                                                                                                                    };
-                                                                                                            
-                                                                                                                    recorder.onstop = async () => {
-                                                                                                                        const blob = new Blob(chunks, { type: video.mimeType || "video/webm" });
-                                                                                                                        resolve(Array.from(new Uint8Array(await blob.arrayBuffer())));
-                                                                                                                    };
-                                                                                                            
-                                                                                                                    recorder.onerror = reject;
-                                                                                                            
-                                                                                                                    recorder.start();
-                                                                                                                    video.currentTime = 0;
-                                                                                                                    video.play();
-                                                                                                            
-                                                                                                                    video.onended = () => recorder.stop();
-                                                                                                                });
-                                                                                                            }
-                                                                                                            """)
+        question_media = media_container_locator.locator("video#video").evaluate(watch_fetcher_script)
         question_media_name = f"{uuid4().hex}.webm"
         is_img = False
 
