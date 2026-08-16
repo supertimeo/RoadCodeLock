@@ -6,7 +6,7 @@ class SubQuestionChoice(BaseModel):
 
 
 class SubQuestion(BaseModel):
-    sub_question: str
+    sub_question: str | None
     choices: list[SubQuestionChoice]
 
 

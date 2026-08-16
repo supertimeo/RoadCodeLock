@@ -131,7 +131,7 @@ def extract_question_data(page: Page) -> Question:
             question_title = question_title_div.text().replace(' ', ' ').strip() if question_title_div is not None else None,
             sub_questions = [
                 SubQuestion(
-                    sub_question = sub_question_div.css_first("p").text().replace(' ', ' ').strip(),
+                    sub_question = sub_question_div.css_first("p").text().replace(' ', ' ').strip() if sub_question_div.css_first("p") is not None else None,
                     choices = [
                         SubQuestionChoice(
                             choice = choice_li.css_first("div > label").text().replace(' ', ' ').strip(),
@@ -139,9 +139,9 @@ def extract_question_data(page: Page) -> Question:
                         )
                         for choice_li in sub_question_div.css("ul > li")
                     ]
-                ) for sub_question_div in form_element.css("div[id]") if re.match(r"question-\d+", cast(str, sub_question_div.attributes.get("id"))) and sub_question_div.css_first("p") is not None
+                ) for sub_question_div in form_element.css("div[id]") if re.match(r"question-\d+", cast(str, sub_question_div.attributes.get("id")))
             ],
-                explanations = explanations_div.text()
+            explanations = explanations_div.text()
         )
     except Exception as e:
         raise ParsingError("Failed to parse question data from quiz page") from e
