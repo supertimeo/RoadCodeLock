@@ -3,12 +3,14 @@ import json
 import re
 import time
 from pathlib import Path
-from typing import cast, Any
+from typing import cast
 from uuid import uuid4
 
 from playwright.sync_api import sync_playwright, Page
 from pydantic.dataclasses import dataclass
 from selectolax.parser import HTMLParser, Node
+
+from models.question_model import Question, SubQuestion, SubQuestionChoice
 
 scripts_folder = Path(__file__).resolve().parent / "scripts"
 
@@ -20,7 +22,7 @@ class InitializationData:
     quizz_url: str
 
 
-def fetch_data(page: Page) -> dict[str, Any]:
+def fetch_data(page: Page) -> Question:
     page_locator = page.locator("iframe[title=\"Je repasse le code\"]").content_frame
     quizz_locator = page_locator.locator("div#quizz-container")
     tree = HTMLParser(quizz_locator.inner_html())
@@ -56,24 +58,24 @@ def fetch_data(page: Page) -> dict[str, Any]:
 
     question_title_div = question_content_div.css_first("div.questiontitle")
     # noinspection unresolved-references
-    question_data = {
-        "question_media_name": question_media_name,
-        "question_media_is_img": is_img,
-        "question_title": question_title_div.text().replace(' ', ' ').strip() if question_title_div is not None else None,
-        "sub_questions": [
-            {
-                "sub_question": sub_question_div.css_first("p").text().replace(' ', ' ').strip(),
-                "choices": [
-                    {
-                        "choice": choice_li.css_first("div > label").text().replace(' ', ' ').strip(),
-                        "is_correct": int(cast(str, choice_li.css_first("span").attributes.get("data-valid")))
-                    }
+    question_data = Question(
+        question_media_name = question_media_name,
+        question_media_is_image = is_img,
+        question_title = question_title_div.text().replace(' ', ' ').strip() if question_title_div is not None else None,
+        sub_questions = [
+            SubQuestion(
+                sub_question = sub_question_div.css_first("p").text().replace(' ', ' ').strip(),
+                choices = [
+                    SubQuestionChoice(
+                        choice = choice_li.css_first("div > label").text().replace(' ', ' ').strip(),
+                        is_correct = bool(int(cast(str, choice_li.css_first("span").attributes.get("data-valid"))))
+                    )
                     for choice_li in sub_question_div.css("ul > li")
                 ]
-            } for sub_question_div in question_content_div.css_first("form#questions").css("div[id]") if re.match(r"question-\d+", cast(str, sub_question_div.attributes.get("id"))) and sub_question_div.css_first("p") is not None
+            ) for sub_question_div in question_content_div.css_first("form#questions").css("div[id]") if re.match(r"question-\d+", cast(str, sub_question_div.attributes.get("id"))) and sub_question_div.css_first("p") is not None
         ],
-        "explanations": question_content_div.css_first("div#explications > p").text()
-    }
+        explanations = question_content_div.css_first("div#explications > p").text()
+    )
 
     time.sleep(0.5)
 
@@ -96,7 +98,7 @@ def init() -> InitializationData:
 def main():
     initialization_data = init()
 
-    dataset = []
+    dataset: list[Question] = []
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=False)
@@ -120,7 +122,7 @@ def main():
         browser.close()
 
     with open("assets/dataset.json", "w", encoding='utf-8') as f:
-        json.dump(dataset, f, indent=4, ensure_ascii=False)
+        json.dump([question.model_dump() for question in dataset], f, indent=4, ensure_ascii=False)
 
 if __name__ == "__main__":
     main()
