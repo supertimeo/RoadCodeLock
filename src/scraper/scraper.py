@@ -3,7 +3,6 @@ import json
 import re
 import time
 from asyncio import CancelledError
-from itertools import chain
 from pathlib import Path
 from typing import cast
 from uuid import uuid4
@@ -79,18 +78,18 @@ async def extract_question_data(page: Page) -> Question:
             question_media_name = question_media_name,
             question_media_is_image = is_img,
             question_title = question_title_div.text().replace(' ', ' ').strip() if question_title_div is not None else None,
-            sub_questions = [
+            sub_questions = tuple(
                 SubQuestion(
                     sub_question = sub_question_div.css_first("p").text().replace(' ', ' ').strip() if sub_question_div.css_first("p") is not None else None,
-                    choices = [
+                    choices = tuple(
                         SubQuestionChoice(
                             choice = choice_li.css_first("div > label").text().replace(' ', ' ').strip(),
                             is_correct = bool(int(cast(str, choice_li.css_first("span").attributes.get("data-valid"))))
                         )
                         for choice_li in sub_question_div.css("ul > li")
-                    ]
+                        )
                 ) for sub_question_div in form_element.css("div[id]") if re.match(r"question-\d+", cast(str, sub_question_div.attributes.get("id")))
-            ],
+            ),
             explanations = explanations_div.text()
         )
     except Exception as e:
@@ -112,8 +111,8 @@ async def extract_question_data(page: Page) -> Question:
     return question_data
 
 
-async def worker(initialization_data: InitializationData, page: Page) -> list[Question]:
-    local_dataset: list[Question] = []
+async def worker(initialization_data: InitializationData, page: Page) -> set[Question]:
+    local_dataset: set[Question] = set()
 
     logger.trace(f"opening url: {initialization_data.quizz_url}")
     await page.goto(initialization_data.quizz_url)
@@ -128,7 +127,7 @@ async def worker(initialization_data: InitializationData, page: Page) -> list[Qu
             await page.locator("iframe[title=\"Je repasse le code\"]").content_frame.locator("div#rules-entrainement button.button.reverse").click()
 
             for _ in range(10):
-                local_dataset.append(await extract_question_data(page))
+                local_dataset.add(await extract_question_data(page))
 
             await page.locator("iframe[title=\"Je repasse le code\"]").content_frame.locator("div#screen-gameover > ul#gameover-buttons-list > li").nth(2).locator("button").click()
     except CancelledError:
@@ -141,20 +140,59 @@ async def worker(initialization_data: InitializationData, page: Page) -> list[Qu
 async def main():
     initialization_data = init()
 
-    dataset: list[Question] = []
-
     async with async_playwright() as p:
-        logger.trace("openning browser")
+        logger.trace("opening browser")
+
         browser = await p.chromium.launch(headless=False)
         context = await browser.new_context()
 
-        pages = [await context.new_page() for _ in range(initialization_data.num_workers)]
-        dataset =  [question async for local_dataset in await asyncio.gather(*(worker(initialization_data, page) for page in pages)) for question in local_dataset]
+        pages = [
+            await context.new_page()
+            for _ in range(initialization_data.num_workers)
+        ]
 
-        await browser.close()
+        workers = [
+            asyncio.create_task(
+                worker(initialization_data, page),
+                name=f"Worker-{i}"
+            )
+            for i, page in enumerate(pages)
+        ]
 
-    with open("assets/dataset.json", "w", encoding='utf-8') as f:
-        json.dump([question.model_dump() for question in dataset], f, indent=4, ensure_ascii=False)
+        try:
+            results = await asyncio.gather(*workers)
+
+        except asyncio.CancelledError:
+            logger.info("Cancelling workers...")
+
+            for task in workers:
+                if not task.done():
+                    task.cancel()
+
+            results = await asyncio.gather(
+                *workers,
+                return_exceptions=True
+            )
+
+        finally:
+            await context.close()
+
+    dataset = {
+        question
+        for local_dataset in results
+        for question in local_dataset
+    }
+
+    with open("assets/dataset.json", "w", encoding="utf-8") as f:
+        json.dump(
+            [question.model_dump() for question in dataset],
+            f,
+            indent=4,
+            ensure_ascii=False
+        )
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("Scraping interrupted by user")

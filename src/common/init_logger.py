@@ -31,8 +31,12 @@ def log_patcher(record: Record):
     class_name = record["extra"].get("class_name")
     record["extra"]["location"] = f"{record['file'].name}{f":{class_name}" if class_name is not None else ""}{f":{record['function']}" if record['function'] != "<module>" else ""}:{record['line']}"
 
-    task = asyncio.current_task()
-    record["extra"]["worker"] = task.get_name() if task else "Main"
+    try:
+        task = asyncio.current_task()
+    except RuntimeError:
+        task = None
+
+    record["extra"]["worker"] = task.get_name() if task is not None else "Main-task"
 
 
 def log_format(_record: Record) -> str:
