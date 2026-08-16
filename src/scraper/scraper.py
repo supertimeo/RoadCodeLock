@@ -22,7 +22,7 @@ class InitializationData:
     quizz_url: str
 
 
-def fetch_data(page: Page) -> Question:
+def extract_question_data(page: Page) -> Question:
     page_locator = page.locator("iframe[title=\"Je repasse le code\"]").content_frame
     quizz_locator = page_locator.locator("div#quizz-container")
     tree = HTMLParser(quizz_locator.inner_html())
