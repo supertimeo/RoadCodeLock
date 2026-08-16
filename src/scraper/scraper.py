@@ -1,3 +1,4 @@
+import argparse
 import json
 import re
 import time
@@ -7,8 +8,6 @@ from uuid import uuid4
 
 from playwright.sync_api import sync_playwright, Page
 from selectolax.parser import HTMLParser, Node
-
-QUIZZ_URL = "https://www.securite-routiere.gouv.fr/les-medias/nos-quiz/je-repasse-le-code"
 
 scripts_folder = Path(__file__).resolve().parent / "scripts"
 
@@ -76,14 +75,28 @@ def fetch_data(page: Page) -> dict[str, Any]:
 
     return question_data
 
+
+def init_args() -> argparse.Namespace:
+    arg_parser = argparse.ArgumentParser(description="Scrape quizzes and explanations")
+    arg_parser.add_argument("quizz_url", type=str, help="URL of the quizz")
+    return arg_parser.parse_args()
+
+
+def init() -> str:
+    args = init_args()
+    return args.quizz_url
+
+
 def main():
+    quizz_url = init()
+
     dataset = []
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=False)
         page = browser.new_page()
 
-        page.goto(QUIZZ_URL)
+        page.goto(quizz_url)
 
         # Attendre que le contenu soit généré
         page.locator("iframe[title=\"Je repasse le code\"]").content_frame.locator("div#choice-1.choice[role='button']").click()
