@@ -1,3 +1,4 @@
+import asyncio
 import sys
 from enum import StrEnum
 from typing import TYPE_CHECKING
@@ -29,7 +30,9 @@ def log_patcher(record: Record):
     """
     class_name = record["extra"].get("class_name")
     record["extra"]["location"] = f"{record['file'].name}{f":{class_name}" if class_name is not None else ""}{f":{record['function']}" if record['function'] != "<module>" else ""}:{record['line']}"
-    record["extra"]["thread_info"] = f"{record["thread"].name} ({record["thread"].id})"
+
+    task = asyncio.current_task()
+    record["extra"]["worker"] = task.get_name() if task else "Main"
 
 
 def log_format(_record: Record) -> str:
@@ -46,7 +49,7 @@ def log_format(_record: Record) -> str:
         "{time:YYYY-MM-DD HH:mm:ss.SSS} | "
         "<level>{level: <8}</level> | "
         "{extra[location]: <50} | "
-        "{extra[thread_info]: <20} - "
+        "{extra[worker]: <20} - "
         "{message}\n"
         "{exception}"
     )

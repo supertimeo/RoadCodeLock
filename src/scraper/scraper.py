@@ -1,16 +1,19 @@
+import asyncio
 import json
 import re
 import time
+from asyncio import CancelledError
+from itertools import chain
 from pathlib import Path
 from typing import cast
 from uuid import uuid4
 
 from loguru import logger
-from playwright.sync_api import sync_playwright, Page, TimeoutError
+from playwright.async_api import async_playwright, Page, TimeoutError
 from selectolax.parser import HTMLParser
 
-from scraper.bootstrap import init
-from scraper.errors import ElementNotFoundError, MediaExtractionError, MediaSaveError, FormNotFoundError, ExplanationsNotFoundError, ParsingError
+from scraper.bootstrap import init, InitializationData
+from scraper.errors import ElementNotFoundError, MediaExtractionError, MediaSaveError, FormNotFoundError, ExplanationsNotFoundError, ParsingError, NavigationError
 
 from models.question_model import Question, SubQuestion, SubQuestionChoice
 
@@ -19,10 +22,10 @@ scripts_folder_path = Path(__file__).resolve().parent / "scripts"
 image_fetcher_script = (scripts_folder_path / "image_fetcher.js").read_text()
 watch_fetcher_script = (scripts_folder_path / "watch_fetcher.js").read_text()
 
-def extract_question_data(page: Page) -> Question:
+async def extract_question_data(page: Page) -> Question:
     page_locator = page.locator("iframe[title=\"Je repasse le code\"]").content_frame
     quizz_locator = page_locator.locator("div#quizz-container")
-    tree = HTMLParser(quizz_locator.inner_html())
+    tree = HTMLParser(await quizz_locator.inner_html())
 
     question_content_div = tree.css_first("div.question_content")
     if question_content_div is None:
@@ -30,25 +33,25 @@ def extract_question_data(page: Page) -> Question:
 
     time.sleep(0.5)
 
-    for sub_question_div in quizz_locator.locator("div.question_content > form#questions").locator("div[id]").all():
-        if not re.match(r"question-\d+", cast(str, sub_question_div.get_attribute("id"))) or sub_question_div.locator("p").count() <= 0:
+    for sub_question_div in await quizz_locator.locator("div.question_content > form#questions").locator("div[id][data-active='1']").all():
+        if not re.match(r"question-\d+", cast(str, await sub_question_div.get_attribute("id"))):
             continue
-        sub_question_div.locator("ul > li").first.click()
+        await sub_question_div.locator("ul > li").first.click()
 
     time.sleep(0.5)
 
-    quizz_locator.locator("div.question_content button#button-resultat").click()
+    await quizz_locator.locator("div.question_content button#button-resultat").click()
 
     media_container_locator = quizz_locator.locator("div#media-container")
 
     try:
-        if (question_img_locator := media_container_locator.locator("img#question-img")).count():
-            question_media = question_img_locator.evaluate(image_fetcher_script)
+        if await (question_img_locator := media_container_locator.locator("img#question-img")).count():
+            question_media = await question_img_locator.evaluate(image_fetcher_script)
             question_media_name = f"{uuid4().hex}.webp"
             is_img = True
         else:
             # noinspection bad-argument-type
-            question_media = media_container_locator.locator("video#video").evaluate(watch_fetcher_script)
+            question_media = await media_container_locator.locator("video#video").evaluate(watch_fetcher_script)
             question_media_name = f"{uuid4().hex}.webm"
             is_img = False
     except Exception as e:
@@ -97,11 +100,11 @@ def extract_question_data(page: Page) -> Question:
 
     for i in range(3):
         try:
-            quizz_locator.locator("div.question_content button#button-continue").click()
+            await quizz_locator.locator("div.question_content button#button-continue").click()
             break
         except TimeoutError as e:
             if i == 2:
-                raise ElementNotFoundError("Failed to click continue button after 3 attempts") from e
+                raise NavigationError("Failed to click continue button after 3 attempts") from e
 
             logger.warning("Failed to click the continue button.")
             continue
@@ -109,39 +112,49 @@ def extract_question_data(page: Page) -> Question:
     return question_data
 
 
+async def worker(initialization_data: InitializationData, page: Page) -> list[Question]:
+    local_dataset: list[Question] = []
+
+    logger.trace(f"opening url: {initialization_data.quizz_url}")
+    await page.goto(initialization_data.quizz_url)
+
+    await page.locator("div#footer_tc_privacy button#footer_tc_privacy_button").click()
+
+    # Attendre que le contenu soit généré
+    await page.locator("iframe[title=\"Je repasse le code\"]").content_frame.locator("div#choice-1.choice[role='button']").click()
+
+    try:
+        while True:
+            await page.locator("iframe[title=\"Je repasse le code\"]").content_frame.locator("div#rules-entrainement button.button.reverse").click()
+
+            for _ in range(10):
+                local_dataset.append(await extract_question_data(page))
+
+            await page.locator("iframe[title=\"Je repasse le code\"]").content_frame.locator("div#screen-gameover > ul#gameover-buttons-list > li").nth(2).locator("button").click()
+    except CancelledError:
+        logger.success("worker stoping successfull")
+        return local_dataset
+
+
+
 @logger.catch(message="An unexpected error occurred during scraping")
-def main():
+async def main():
     initialization_data = init()
 
     dataset: list[Question] = []
 
-    with sync_playwright() as p:
+    async with async_playwright() as p:
         logger.trace("openning browser")
-        browser = p.chromium.launch(headless=False)
-        page = browser.new_page()
+        browser = await p.chromium.launch(headless=False)
+        context = await browser.new_context()
 
-        logger.trace(f"opening url: {initialization_data.quizz_url}")
-        page.goto(initialization_data.quizz_url)
+        pages = [await context.new_page() for _ in range(initialization_data.num_workers)]
+        dataset =  [question async for local_dataset in await asyncio.gather(*(worker(initialization_data, page) for page in pages)) for question in local_dataset]
 
-        page.locator("div#footer_tc_privacy button#footer_tc_privacy_button").click()
-
-        # Attendre que le contenu soit généré
-        page.locator("iframe[title=\"Je repasse le code\"]").content_frame.locator("div#choice-1.choice[role='button']").click()
-
-        try:
-            while True:
-                page.locator("iframe[title=\"Je repasse le code\"]").content_frame.locator("div#rules-entrainement button.button.reverse").click()
-
-                dataset.extend(extract_question_data(page) for _ in range(10))
-
-                page.locator("iframe[title=\"Je repasse le code\"]").content_frame.locator("div#screen-gameover > ul#gameover-buttons-list > li").nth(2).locator("button").click()
-        except KeyboardInterrupt:
-            pass
-
-        browser.close()
+        await browser.close()
 
     with open("assets/dataset.json", "w", encoding='utf-8') as f:
         json.dump([question.model_dump() for question in dataset], f, indent=4, ensure_ascii=False)
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
