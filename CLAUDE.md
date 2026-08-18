@@ -95,6 +95,45 @@ Use the browser DevTools (F12) or Playwright Inspector to inspect the quiz page 
 - The `page.pause()` call is intentional, allowing manual inspection and interaction
 - CSS selectors target quiz choice elements (e.g., `div#choice-1.choice[role='button']`)
 
+## Error Handling Principles
+
+**Only catch specific exceptions when there's a clear reason**
+
+Catch specific exception types ONLY when one of these conditions is true:
+1. You need **different behavior** for that specific exception (e.g., retry, return default, exit gracefully)
+2. You need to **add context** to the error message (e.g., include filename, parameter value that failed)
+3. You need to **pinpoint the failure location** (e.g., separate TypeError from `bytes()` vs from file I/O)
+
+Otherwise, use a general `Exception` catch — the traceback already shows the exact exception type, so being overly specific adds noise without benefit.
+
+**Examples:**
+
+❌ **Bad** — catching TimeoutError just to add context that's already in the traceback:
+```python
+except TimeoutError as e:
+    raise MediaExtractionError("Failed to extract media: timeout") from e
+```
+
+✅ **Good** — catching TypeError separately to clarify which operation failed:
+```python
+except (FileNotFoundError, PermissionError, OSError) as e:
+    raise MediaSaveError(f"Failed to save media file: {filename}") from e
+except TypeError as e:
+    raise MediaSaveError(f"Failed to convert media to bytes: {filename}") from e
+```
+
+✅ **Good** — simple and clear when behavior is identical:
+```python
+except Exception as e:
+    cause = getattr(e, "__cause__", e)
+    if cause is not None and "Connection closed" in str(cause):
+        return local_dataset
+    logger.exception("Error during scraping. Restarting...")
+    await page.reload()
+```
+
+**Note:** Don't catch and `raise` custom exceptions without modification — let them bubble up naturally.
+
 ## Collaboration Notes
 
 - **Langue de communication** : Toujours communiquer et répondre en français

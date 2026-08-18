@@ -7,11 +7,12 @@ from typing import cast
 from uuid import uuid4
 
 from loguru import logger
+from playwright._impl._errors import TargetClosedError
 from playwright.async_api import async_playwright, Page, TimeoutError
 from selectolax.parser import HTMLParser
 
 from scraper.bootstrap import init, InitializationData
-from scraper.errors import ElementNotFoundError, MediaExtractionError, MediaSaveError, FormNotFoundError, ExplanationsNotFoundError, ParsingError
+from scraper.errors import ElementNotFoundError, MediaExtractionError, MediaSaveError, FormNotFoundError, ExplanationsNotFoundError, ParsingError, NavigationError
 
 from models.question_model import Question, SubQuestion, SubQuestionChoice
 
@@ -62,14 +63,16 @@ async def extract_question_data(page: Page) -> Question:
             question_media = await media_container_locator.locator("video#video").evaluate(watch_fetcher_script)
             question_media_name = f"{uuid4().hex}.webm"
             is_img = False
-    except Exception as e:
+    except (TimeoutError, RuntimeError, OSError, TypeError) as e:
         raise MediaExtractionError("Failed to extract media (image or video) from quiz page") from e
 
     try:
         with open(f"assets/medias/{question_media_name}", "wb") as f:
             f.write(bytes(question_media))
-    except Exception as e:
+    except (FileNotFoundError, PermissionError, OSError) as e:
         raise MediaSaveError(f"Failed to save media file: {question_media_name}") from e
+    except TypeError as e:
+        raise MediaSaveError(f"Failed to convert media to bytes: {question_media_name}") from e
 
     try:
         question_title_div = question_content_div.css_first("div.questiontitle")
@@ -101,7 +104,7 @@ async def extract_question_data(page: Page) -> Question:
             ),
             explanations = explanations_div.text()
         )
-    except Exception as e:
+    except (TypeError, ValueError, AttributeError) as e:
         raise ParsingError("Failed to parse question data from quiz page") from e
 
     await asyncio.sleep(0.5)
@@ -112,8 +115,7 @@ async def extract_question_data(page: Page) -> Question:
             break
         except TimeoutError:
             if i == 2:
-                await page.pause()
-                #raise NavigationError("Failed to click continue button after 3 attempts") from e
+                raise NavigationError("Failed to click continue button after 3 attempts") from e
 
             logger.warning("Failed to click the continue button.")
             continue
@@ -148,15 +150,9 @@ async def worker(initialization_data: InitializationData, page: Page) -> set[Que
         except CancelledError:
             logger.success("worker stoping successfull")
             return local_dataset
-        except Exception as e:
-            # Récupère l'erreur d'origine (celle passée via "raise ... from e")
-            cause = getattr(e, "__cause__", e)
-
-            # Si le script s'est arrêté à cause du Ctrl+C, on quitte sans faire de reload
-            if cause is not None and "Connection closed" in str(cause):
-                logger.info("Navigateur déconnecté (Arrêt en cours...).")
-                return local_dataset
-
+        except TargetClosedError:
+            pass
+        except Exception:
             logger.exception("An expected error occured during scraping. restarting...")
             await page.reload()
 
