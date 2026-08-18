@@ -89,13 +89,13 @@ async def extract_question_data(page: Page) -> Question:
         question_data = Question(
             question_media_name = question_media_name,
             question_media_is_image = is_img,
-            question_title = question_title_div.text().replace(' ', ' ').strip() if question_title_div is not None else None,
+            question_title = question_title_div.text().replace(' ', ' ').strip() if question_title_div is not None else None,
             sub_questions = tuple(
                 SubQuestion(
-                    sub_question = sub_question_div.css_first("p").text().replace(' ', ' ').strip() if sub_question_div.css_first("p") is not None else None,
+                    sub_question = sub_question_div.css_first("p").text().replace(' ', ' ').strip() if sub_question_div.css_first("p") is not None else None,
                     choices = tuple(
                         SubQuestionChoice(
-                            choice = choice_li.css_first("div > label").text().replace(' ', ' ').strip(),
+                            choice = choice_li.css_first("div > label").text().replace(' ', ' ').strip(),
                             is_correct = bool(int(cast(str, choice_li.css_first("span").attributes.get("data-valid"))))
                         )
                         for choice_li in sub_question_div.css("ul > li")
@@ -113,11 +113,11 @@ async def extract_question_data(page: Page) -> Question:
         try:
             await button_continue_locator.click()
             break
-        except TimeoutError:
+        except TimeoutError as e:
             if i == 2:
                 raise NavigationError("Failed to click continue button after 3 attempts") from e
 
-            logger.warning("Failed to click the continue button.")
+            logger.warning(f"Failed to click continue button, attempt {i+1}/3")
             continue
 
     return question_data
@@ -129,10 +129,11 @@ async def worker(initialization_data: InitializationData, page: Page) -> set[Que
     while True:
         # noinspection broad-exception
         try:
-            logger.trace(f"opening url: {initialization_data.quizz_url}")
+            logger.trace(f"Opening URL: {initialization_data.quizz_url}")
             await page.goto(initialization_data.quizz_url)
 
             if not accepted_cookies:
+                logger.debug("Accepting privacy cookies")
                 await page.locator("div#footer_tc_privacy button#footer_tc_privacy_button").click()
                 accepted_cookies = True
 
@@ -148,12 +149,12 @@ async def worker(initialization_data: InitializationData, page: Page) -> set[Que
                 await page.locator("iframe[title=\"Je repasse le code\"]").content_frame.locator("div#screen-gameover > ul#gameover-buttons-list > li").nth(2).locator("button").click()
 
         except CancelledError:
-            logger.success("worker stoping successfull")
+            logger.success("Worker stopped successfully")
             return local_dataset
         except TargetClosedError:
             pass
         except Exception:
-            logger.exception("An expected error occured during scraping. restarting...")
+            logger.exception("An unexpected error occurred during scraping. Restarting...")
             await page.reload()
 
 
@@ -162,7 +163,7 @@ async def main():
     initialization_data = init()
 
     async with async_playwright() as p:
-        logger.trace("opening browser")
+        logger.trace("Opening Chromium browser")
 
         browser = await p.chromium.launch(headless=False, args=["--mute-audio"])
         context = await browser.new_context()
@@ -179,6 +180,7 @@ async def main():
             )
             for i, page in enumerate(pages)
         ]
+        logger.info(f"Started {len(workers)} worker task(s)")
 
         try:
             results = await asyncio.gather(*workers)
@@ -203,7 +205,9 @@ async def main():
         for local_dataset in results
         for question in local_dataset
     }
+    logger.info(f"Total questions collected: {len(dataset)}")
 
+    logger.debug("Saving dataset to assets/dataset.json")
     with open("assets/dataset.json", "w", encoding="utf-8") as f:
         json.dump(
             [question.model_dump() for question in dataset],
@@ -211,9 +215,11 @@ async def main():
             indent=4,
             ensure_ascii=False
         )
+    logger.success(f"Dataset saved successfully")
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
+        logger.info("Scraping completed successfully")
     except KeyboardInterrupt:
-        logger.info("Scraping interrupted by user")
+        logger.warning("Scraping interrupted by user")
