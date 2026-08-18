@@ -1,7 +1,6 @@
 import asyncio
 import json
 import re
-import time
 from asyncio import CancelledError
 from pathlib import Path
 from typing import cast
@@ -33,7 +32,7 @@ async def extract_question_data(page: Page) -> Question:
     button_continue_locator = quizz_locator.locator("div.question_content button#button-continue")
 
     try:
-        time.sleep(0.5)
+        await asyncio.sleep(0.5)
 
         for sub_question_div in await quizz_locator.locator("div.question_content > form#questions").locator("div[id][data-active='1']").all():
             if not re.match(r"question-\d+", cast(str, await sub_question_div.get_attribute("id"))):
@@ -44,7 +43,7 @@ async def extract_question_data(page: Page) -> Question:
                 await choice_li_locator.first.click()
 
 
-        time.sleep(0.5)
+        await asyncio.sleep(0.5)
 
         await quizz_locator.locator("div.question_content button#button-resultat").click()
 
@@ -105,7 +104,7 @@ async def extract_question_data(page: Page) -> Question:
     except Exception as e:
         raise ParsingError("Failed to parse question data from quiz page") from e
 
-    time.sleep(0.5)
+    await asyncio.sleep(0.5)
 
     for i in range(3):
         try:
@@ -126,6 +125,7 @@ async def worker(initialization_data: InitializationData, page: Page) -> set[Que
     local_dataset: set[Question] = set()
     accepted_cookies = False
     while True:
+        # noinspection broad-exception
         try:
             logger.trace(f"opening url: {initialization_data.quizz_url}")
             await page.goto(initialization_data.quizz_url)
@@ -137,20 +137,27 @@ async def worker(initialization_data: InitializationData, page: Page) -> set[Que
             # Attendre que le contenu soit généré
             await page.locator("iframe[title=\"Je repasse le code\"]").content_frame.locator("div#choice-1.choice[role='button']").click()
 
-            try:
-                while True:
-                    await page.locator("iframe[title=\"Je repasse le code\"]").content_frame.locator("div#rules-entrainement button.button.reverse").click()
+            while True:
+                await page.locator("iframe[title=\"Je repasse le code\"]").content_frame.locator("div#rules-entrainement button.button.reverse").click()
 
-                    for _ in range(10):
-                        local_dataset.add(await extract_question_data(page))
+                for _ in range(10):
+                    local_dataset.add(await extract_question_data(page))
 
-                    await page.locator("iframe[title=\"Je repasse le code\"]").content_frame.locator("div#screen-gameover > ul#gameover-buttons-list > li").nth(2).locator("button").click()
-            except CancelledError:
-                logger.success("worker stoping successfull")
+                await page.locator("iframe[title=\"Je repasse le code\"]").content_frame.locator("div#screen-gameover > ul#gameover-buttons-list > li").nth(2).locator("button").click()
+
+        except CancelledError:
+            logger.success("worker stoping successfull")
+            return local_dataset
+        except Exception as e:
+            # Récupère l'erreur d'origine (celle passée via "raise ... from e")
+            cause = getattr(e, "__cause__", e)
+
+            # Si le script s'est arrêté à cause du Ctrl+C, on quitte sans faire de reload
+            if cause is not None and "Connection closed" in str(cause):
+                logger.info("Navigateur déconnecté (Arrêt en cours...).")
                 return local_dataset
-        except Exception:
+
             logger.exception("An expected error occured during scraping. restarting...")
-            await page.pause()
             await page.reload()
 
 
