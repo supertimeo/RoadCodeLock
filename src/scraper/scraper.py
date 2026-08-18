@@ -30,20 +30,27 @@ async def extract_question_data(page: Page) -> Question:
     if question_content_div is None:
         raise ElementNotFoundError("Failed to find 'div.question_content' in quiz page")
 
-    time.sleep(0.5)
+    button_continue_locator = quizz_locator.locator("div.question_content button#button-continue")
 
-    for sub_question_div in await quizz_locator.locator("div.question_content > form#questions").locator("div[id][data-active='1']").all():
-        if not re.match(r"question-\d+", cast(str, await sub_question_div.get_attribute("id"))):
-            continue
+    try:
+        time.sleep(0.5)
 
-        choice_li_locator = sub_question_div.locator("ul > li").first
-        while not await choice_li_locator.locator("input").is_checked():
-            await choice_li_locator.first.click()
+        for sub_question_div in await quizz_locator.locator("div.question_content > form#questions").locator("div[id][data-active='1']").all():
+            if not re.match(r"question-\d+", cast(str, await sub_question_div.get_attribute("id"))):
+                continue
+
+            choice_li_locator = sub_question_div.locator("ul > li").first
+            while not await choice_li_locator.locator("input").is_checked():
+                await choice_li_locator.first.click()
 
 
-    time.sleep(0.5)
+        time.sleep(0.5)
 
-    await quizz_locator.locator("div.question_content button#button-resultat").click()
+        await quizz_locator.locator("div.question_content button#button-resultat").click()
+
+    except TimeoutError:
+        if not await button_continue_locator.is_visible():
+            raise
 
     media_container_locator = quizz_locator.locator("div#media-container")
     try:
@@ -102,7 +109,7 @@ async def extract_question_data(page: Page) -> Question:
 
     for i in range(3):
         try:
-            await quizz_locator.locator("div.question_content button#button-continue").click()
+            await button_continue_locator.click()
             break
         except TimeoutError:
             if i == 2:
