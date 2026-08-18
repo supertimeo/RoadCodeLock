@@ -165,7 +165,7 @@ async def main():
     async with async_playwright() as p:
         logger.trace("Opening Chromium browser")
 
-        browser = await p.chromium.launch(headless=False, args=["--mute-audio"])
+        browser = await p.chromium.launch(args=["--mute-audio"])
         context = await browser.new_context()
 
         pages = [
@@ -198,7 +198,11 @@ async def main():
             )
 
         finally:
-            await context.close()
+            try:
+                await context.close()
+            except Exception:
+                # Si le navigateur est déjà mort à cause du Ctrl+C, on ignore l'erreur
+                logger.debug(f"Context is already closed or inaccessible")
 
     dataset = {
         question
