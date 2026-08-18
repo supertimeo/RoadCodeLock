@@ -12,7 +12,7 @@ from playwright.async_api import async_playwright, Page, TimeoutError
 from selectolax.parser import HTMLParser
 
 from scraper.bootstrap import init, InitializationData
-from scraper.errors import ElementNotFoundError, MediaExtractionError, MediaSaveError, FormNotFoundError, ExplanationsNotFoundError, ParsingError, NavigationError
+from scraper.errors import ElementNotFoundError, MediaExtractionError, MediaSaveError, FormNotFoundError, ExplanationsNotFoundError, ParsingError
 
 from models.question_model import Question, SubQuestion, SubQuestionChoice
 
@@ -35,14 +35,17 @@ async def extract_question_data(page: Page) -> Question:
     for sub_question_div in await quizz_locator.locator("div.question_content > form#questions").locator("div[id][data-active='1']").all():
         if not re.match(r"question-\d+", cast(str, await sub_question_div.get_attribute("id"))):
             continue
-        await sub_question_div.locator("ul > li").first.click()
+
+        choice_li_locator = sub_question_div.locator("ul > li").first
+        while not await choice_li_locator.locator("input").is_checked():
+            await choice_li_locator.first.click()
+
 
     time.sleep(0.5)
 
     await quizz_locator.locator("div.question_content button#button-resultat").click()
 
     media_container_locator = quizz_locator.locator("div#media-container")
-
     try:
         if await (question_img_locator := media_container_locator.locator("img#question-img")).count():
             question_media = await question_img_locator.evaluate(image_fetcher_script)
@@ -101,9 +104,10 @@ async def extract_question_data(page: Page) -> Question:
         try:
             await quizz_locator.locator("div.question_content button#button-continue").click()
             break
-        except TimeoutError as e:
+        except TimeoutError:
             if i == 2:
-                raise NavigationError("Failed to click continue button after 3 attempts") from e
+                await page.pause()
+                #raise NavigationError("Failed to click continue button after 3 attempts") from e
 
             logger.warning("Failed to click the continue button.")
             continue
@@ -113,27 +117,34 @@ async def extract_question_data(page: Page) -> Question:
 
 async def worker(initialization_data: InitializationData, page: Page) -> set[Question]:
     local_dataset: set[Question] = set()
+    accepted_cookies = False
+    while True:
+        try:
+            logger.trace(f"opening url: {initialization_data.quizz_url}")
+            await page.goto(initialization_data.quizz_url)
 
-    logger.trace(f"opening url: {initialization_data.quizz_url}")
-    await page.goto(initialization_data.quizz_url)
+            if not accepted_cookies:
+                await page.locator("div#footer_tc_privacy button#footer_tc_privacy_button").click()
+                accepted_cookies = True
 
-    await page.locator("div#footer_tc_privacy button#footer_tc_privacy_button").click()
+            # Attendre que le contenu soit généré
+            await page.locator("iframe[title=\"Je repasse le code\"]").content_frame.locator("div#choice-1.choice[role='button']").click()
 
-    # Attendre que le contenu soit généré
-    await page.locator("iframe[title=\"Je repasse le code\"]").content_frame.locator("div#choice-1.choice[role='button']").click()
+            try:
+                while True:
+                    await page.locator("iframe[title=\"Je repasse le code\"]").content_frame.locator("div#rules-entrainement button.button.reverse").click()
 
-    try:
-        while True:
-            await page.locator("iframe[title=\"Je repasse le code\"]").content_frame.locator("div#rules-entrainement button.button.reverse").click()
+                    for _ in range(10):
+                        local_dataset.add(await extract_question_data(page))
 
-            for _ in range(10):
-                local_dataset.add(await extract_question_data(page))
-
-            await page.locator("iframe[title=\"Je repasse le code\"]").content_frame.locator("div#screen-gameover > ul#gameover-buttons-list > li").nth(2).locator("button").click()
-    except CancelledError:
-        logger.success("worker stoping successfull")
-        return local_dataset
-
+                    await page.locator("iframe[title=\"Je repasse le code\"]").content_frame.locator("div#screen-gameover > ul#gameover-buttons-list > li").nth(2).locator("button").click()
+            except CancelledError:
+                logger.success("worker stoping successfull")
+                return local_dataset
+        except Exception:
+            logger.exception("An expected error occured during scraping. restarting...")
+            await page.pause()
+            await page.reload()
 
 
 @logger.catch(message="An unexpected error occurred during scraping")
