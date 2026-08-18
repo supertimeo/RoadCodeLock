@@ -154,7 +154,7 @@ async def main():
     async with async_playwright() as p:
         logger.trace("opening browser")
 
-        browser = await p.chromium.launch(headless=False)
+        browser = await p.chromium.launch(headless=False, args=["--mute-audio"])
         context = await browser.new_context()
 
         pages = [
