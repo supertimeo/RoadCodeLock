@@ -3,8 +3,12 @@ name = "roadcodelock"
 version = "0.1.0"
 requires-python = ">=3.14"
 dependencies = [
+    "ffmpeg-python>=0.2.0",
     "loguru>=0.7.3",
+    "pillow>=12.3.0",
     "playwright>=1.62.0",
     "pydantic>=2.13.4",
+    "python-magic>=0.4.27",
     "selectolax>=0.4.11",
+    "tqdm>=4.70.0",
 ]

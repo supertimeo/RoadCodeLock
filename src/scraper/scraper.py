@@ -1,21 +1,23 @@
 import asyncio
 import json
+import os
 import re
 from asyncio import CancelledError
 from pathlib import Path
 from typing import cast, Any
 from uuid import uuid4
 
+import ffmpeg
+import magic
+from PIL import Image
 from loguru import logger
 from playwright._impl._errors import TargetClosedError
 from playwright.async_api import async_playwright, Page, TimeoutError
-from pydantic import BaseModel
 from selectolax.parser import HTMLParser
 
+from models.question_model import Question, SubQuestion, SubQuestionChoice
 from scraper.bootstrap import init, InitializationData
 from scraper.errors import ElementNotFoundError, MediaExtractionError, MediaSaveError, FormNotFoundError, ExplanationsNotFoundError, ParsingError, NavigationError
-
-from models.question_model import Question, SubQuestion, SubQuestionChoice
 
 scripts_folder_path = Path(__file__).resolve().parent / "scripts"
 
@@ -230,6 +232,19 @@ async def main():
             indent=4,
             ensure_ascii=False
         )
+
+    logger.info("converting webp in png")
+    for file in os.listdir("assets/png"):
+        path = Path("assets/medias").resolve() / file
+        mime = magic.from_file(path, mime=True)
+        if mime.startswith("image/"):
+            img = Image.open(file)
+            img.save(Path(file).with_suffix(".png"))
+        elif mime.startswith("video/"):
+            ffmpeg.input(path).output(Path(file).with_suffix(".mp4"), vcodec="libx264", acodec="aac").run()
+        else:
+            logger.warning(f"{file} is not valid media")
+
     logger.success("Dataset saved successfully")
 
 if __name__ == "__main__":
