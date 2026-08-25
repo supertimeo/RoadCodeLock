@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import re
+import shutil
 from asyncio import CancelledError
 from pathlib import Path
 from typing import cast, Any
@@ -233,7 +234,7 @@ async def main():
             ensure_ascii=False
         )
 
-    logger.info("converting webp in png")
+    logger.info("Converting webp in png")
     for file in os.listdir("assets/png"):
         path = Path("assets/medias").resolve() / file
         mime = magic.from_file(path, mime=True)
@@ -244,6 +245,10 @@ async def main():
             ffmpeg.input(path).output(Path(file).with_suffix(".mp4"), vcodec="libx264", acodec="aac").run()
         else:
             logger.warning(f"{file} is not valid media")
+
+    logger.info("Deduplication medias")
+    for media in {question.question_media_name for question in dataset}:
+        shutil.move(Path("assets/medias").resolve() / media, "assets/uniques_medias")
 
     logger.success("Dataset saved successfully")
 
