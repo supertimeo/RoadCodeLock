@@ -3,12 +3,13 @@ import json
 import re
 from asyncio import CancelledError
 from pathlib import Path
-from typing import cast
+from typing import cast, Any
 from uuid import uuid4
 
 from loguru import logger
 from playwright._impl._errors import TargetClosedError
 from playwright.async_api import async_playwright, Page, TimeoutError
+from pydantic import BaseModel
 from selectolax.parser import HTMLParser
 
 from scraper.bootstrap import init, InitializationData
@@ -208,11 +209,17 @@ async def main():
                 # Si le navigateur est déjà mort à cause du Ctrl+C, on ignore l'erreur
                 logger.debug("Context is already closed or inaccessible")
 
-    dataset = {
-        question
-        for local_dataset in results
-        for question in local_dataset
-    }
+    dataset: set[Question] = set()
+    seen: list[dict[str, Any]] = []
+
+    for local_dataset in results:
+        for question in local_dataset:
+            key = question.model_dump(exclude={"question_media_name"})
+
+            if key not in seen:
+                dataset.add(question)
+                seen.append(key)
+
     logger.info(f"Total questions collected: {len(dataset)}")
 
     logger.debug("Saving dataset to assets/dataset.json")
