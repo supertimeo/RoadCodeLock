@@ -22,6 +22,7 @@ image_fetcher_script = (scripts_folder_path / "image_fetcher.js").read_text()
 watch_fetcher_script = (scripts_folder_path / "watch_fetcher.js").read_text()
 
 async def extract_question_data(page: Page) -> Question:
+    # sourcery skip: low-code-quality
     page_locator = page.locator("iframe[title=\"Je repasse le code\"]").content_frame
     quizz_locator = page_locator.locator("div#quizz-container")
     tree = HTMLParser(await quizz_locator.inner_html())
@@ -69,7 +70,7 @@ async def extract_question_data(page: Page) -> Question:
     try:
         with open(f"assets/medias/{question_media_name}", "wb") as f:
             f.write(bytes(question_media))
-    except (FileNotFoundError, PermissionError, OSError) as e:
+    except OSError as e:
         raise MediaSaveError(f"Failed to save media file: {question_media_name}") from e
     except TypeError as e:
         raise MediaSaveError(f"Failed to convert media to bytes: {question_media_name}") from e
@@ -151,9 +152,11 @@ async def worker(initialization_data: InitializationData, page: Page) -> set[Que
         except CancelledError:
             logger.success("Worker stopped successfully")
             return local_dataset
-        except TargetClosedError:
-            pass
-        except Exception:
+
+        except Exception as e:
+            if isinstance(e, TargetClosedError) or "Connection closed while reading from the driver" in str(e):
+                return local_dataset
+
             logger.exception("An unexpected error occurred during scraping. Restarting...")
             await page.reload()
 
@@ -198,11 +201,12 @@ async def main():
             )
 
         finally:
+            # noinspection broad-exception
             try:
                 await context.close()
             except Exception:
                 # Si le navigateur est déjà mort à cause du Ctrl+C, on ignore l'erreur
-                logger.debug(f"Context is already closed or inaccessible")
+                logger.debug("Context is already closed or inaccessible")
 
     dataset = {
         question
@@ -219,7 +223,7 @@ async def main():
             indent=4,
             ensure_ascii=False
         )
-    logger.success(f"Dataset saved successfully")
+    logger.success("Dataset saved successfully")
 
 if __name__ == "__main__":
     try:
