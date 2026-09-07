@@ -226,15 +226,6 @@ async def main():
 
     logger.info(f"Total questions collected: {len(dataset)}")
 
-    logger.debug("Saving dataset to assets/dataset.json")
-    with open(assets_folder_path / "dataset.json", "w", encoding="utf-8") as f:
-        json.dump(
-            [question.model_dump() for question in dataset],
-            f,
-            indent=4,
-            ensure_ascii=False
-        )
-
     logger.info("Converting webp in png")
     for file in os.listdir(assets_folder_path / "medias"):
         # noinspection broad-exception
@@ -250,6 +241,14 @@ async def main():
                 logger.warning(f"{file} is not valid media")
         except Exception:
             logger.exception(f"Error while converting {file}")
+
+
+    logger.debug("Saving dataset to assets/dataset.json")
+    dumped_dataset: list[dict[str, Any]] = [question.model_dump() for question in dataset]
+    for question in dumped_dataset:
+        question["question_media_name"] = question["question_media_name"].replace(".webp", ".png").replace(".webm", ".mp4")
+    with open(assets_folder_path / "dataset.json", "w", encoding="utf-8") as f:
+        json.dump(dumped_dataset, f, indent=4, ensure_ascii=False)
 
     logger.info("Deduplication medias")
     deduplicated_dataset = []
