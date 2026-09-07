@@ -16,6 +16,7 @@ from playwright._impl._errors import TargetClosedError
 from playwright.async_api import async_playwright, Page, TimeoutError
 from selectolax.parser import HTMLParser
 
+from common.paths import assets_folder_path
 from models.question_model import Question, SubQuestion, SubQuestionChoice
 from scraper.bootstrap import init, InitializationData
 from scraper.errors import ElementNotFoundError, MediaExtractionError, MediaSaveError, FormNotFoundError, ExplanationsNotFoundError, ParsingError, NavigationError
@@ -92,9 +93,9 @@ async def extract_question_data(page: Page) -> Question:
 
         # noinspection unresolved-references
         question_data = Question(
-            question_media_name = question_media_name,
+            question_media_name = str(Path(question_media_name).with_suffix(".png" if is_img else ".mp4")),
             question_media_is_image = is_img,
-            question_title = question_title_div.text().replace(' ', ' ').strip() if question_title_div is not None else None,
+            question_title = question_title_div.text().replace(' ', ' ').replace(' ', ' ').strip() if question_title_div is not None else None,
             sub_questions = tuple(
                 SubQuestion(
                     sub_question = sub_question_div.css_first("p").text().replace(' ', ' ').strip() if sub_question_div.css_first("p") is not None else None,
@@ -107,7 +108,7 @@ async def extract_question_data(page: Page) -> Question:
                         )
                 ) for sub_question_div in form_element.css("div[id]") if re.match(r"question-\d+", cast(str, sub_question_div.attributes.get("id")))
             ),
-            explanations = explanations_div.text()
+            explanations = explanations_div.text().replace(' ', ' ')
         )
     except (TypeError, ValueError, AttributeError) as e:
         raise ParsingError("Failed to parse question data from quiz page") from e
@@ -226,7 +227,7 @@ async def main():
     logger.info(f"Total questions collected: {len(dataset)}")
 
     logger.debug("Saving dataset to assets/dataset.json")
-    with open("assets/dataset.json", "w", encoding="utf-8") as f:
+    with open(assets_folder_path / "dataset.json", "w", encoding="utf-8") as f:
         json.dump(
             [question.model_dump() for question in dataset],
             f,
@@ -235,20 +236,34 @@ async def main():
         )
 
     logger.info("Converting webp in png")
-    for file in os.listdir("assets/png"):
-        path = Path("assets/medias").resolve() / file
-        mime = magic.from_file(path, mime=True)
-        if mime.startswith("image/"):
-            img = Image.open(file)
-            img.save(Path(file).with_suffix(".png"))
-        elif mime.startswith("video/"):
-            ffmpeg.input(path).output(Path(file).with_suffix(".mp4"), vcodec="libx264", acodec="aac").run()
-        else:
-            logger.warning(f"{file} is not valid media")
+    for file in os.listdir(assets_folder_path / "medias"):
+        # noinspection broad-exception
+        try:
+            path = Path(assets_folder_path / "medias").resolve() / file
+            mime = magic.from_file(str(path), mime=True)
+            if mime.startswith("image/"):
+                img = Image.open(path)
+                img.save(str(path.with_suffix(".png")))
+            elif mime.startswith("video/"):
+                ffmpeg.input(path).output(str(path.with_suffix(".mp4")), vcodec="libx264", acodec="aac").global_args("-loglevel", "quiet", "-y").run(cmd="binaries/ffmpeg/ffmpeg.exe")
+            else:
+                logger.warning(f"{file} is not valid media")
+        except Exception:
+            logger.exception(f"Error while converting {file}")
 
     logger.info("Deduplication medias")
-    for media in {question.question_media_name for question in dataset}:
-        shutil.move(Path("assets/medias").resolve() / media, "assets/uniques_medias")
+    deduplicated_dataset = []
+    for question in dataset:
+        question_dict = question.model_dump()
+        del question_dict["question_media_name"]
+        media_folder_path = (assets_folder_path / "medias").resolve()
+        shutil.rmtree(assets_folder_path / "uniques_medias")
+        os.mkdir(assets_folder_path / "uniques_medias")
+        if question_dict not in deduplicated_dataset:
+            media_type = ".png" if question.question_media_is_image else ".mp4"
+            media_path = (media_folder_path / question.question_media_name).with_suffix(media_type)
+            shutil.move(media_path, assets_folder_path / "uniques_medias")
+            deduplicated_dataset.append(question_dict)
 
     logger.success("Dataset saved successfully")
 
