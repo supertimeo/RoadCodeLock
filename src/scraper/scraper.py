@@ -10,6 +10,7 @@ from uuid import uuid4
 
 import ffmpeg
 import magic
+from tqdm import tqdm
 from PIL import Image
 from loguru import logger
 from playwright._impl._errors import TargetClosedError
@@ -227,7 +228,7 @@ async def main():
     logger.info(f"Total questions collected: {len(dataset)}")
 
     logger.info("Converting webp in png and webm in mp4")
-    for file in os.listdir(assets_folder_path / "medias"):
+    for file in tqdm(os.listdir(assets_folder_path / "medias")): # type: ignore
         # noinspection broad-exception
         try:
             path = Path(assets_folder_path / "medias").resolve() / file
