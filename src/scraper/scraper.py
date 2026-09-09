@@ -226,7 +226,7 @@ async def main():
 
     logger.info(f"Total questions collected: {len(dataset)}")
 
-    logger.info("Converting webp in png")
+    logger.info("Converting webp in png and webm in mp4")
     for file in os.listdir(assets_folder_path / "medias"):
         # noinspection broad-exception
         try:
@@ -252,15 +252,14 @@ async def main():
 
     logger.info("Deduplication medias")
     deduplicated_dataset = []
+    dataset = {Question(**question_dict) for question_dict in dumped_dataset}
+    shutil.rmtree(assets_folder_path / "uniques_medias")
+    os.mkdir(assets_folder_path / "uniques_medias")
     for question in dataset:
-        question_dict = question.model_dump()
-        del question_dict["question_media_name"]
+        question_dict = question.model_dump(exclude={"question_media_name"})
         media_folder_path = (assets_folder_path / "medias").resolve()
-        shutil.rmtree(assets_folder_path / "uniques_medias")
-        os.mkdir(assets_folder_path / "uniques_medias")
         if question_dict not in deduplicated_dataset:
-            media_type = ".png" if question.question_media_is_image else ".mp4"
-            media_path = (media_folder_path / question.question_media_name).with_suffix(media_type)
+            media_path = media_folder_path / question.question_media_name
             shutil.move(media_path, assets_folder_path / "uniques_medias")
             deduplicated_dataset.append(question_dict)
 
