@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Self
+from typing import Self, Literal
 
 import yaml
 from pydantic import BaseModel
@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 class Config(BaseModel):
     nb_questions: int
+    theme: Literal["dark", "light"]
 
     @classmethod
     def load_from_yml(cls, config_file_path: Path) -> Self:
