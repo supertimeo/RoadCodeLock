@@ -10,6 +10,7 @@ dependencies = [
     "pydantic>=2.13.4",
     "pyside6>=6.11.2",
     "python-magic-bin>=0.4.14",
+    "pyyaml>=6.0.3",
     "selectolax>=0.4.11",
     "tqdm>=4.70.0",
 ]

@@ -6,3 +6,4 @@ uv.lock
 /assets/
 /logs/
 /binaries/
+/configs/

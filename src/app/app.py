@@ -8,7 +8,8 @@ from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import QMainWindow, QWidget, QApplication, QStackedWidget, QLabel, QHBoxLayout, QVBoxLayout, QCheckBox, QPushButton
 
-from common.paths import assets_folder_path
+from app.config_model import Config
+from common.paths import assets_folder_path, configs_folder_path
 from models.question_model import Question, SubQuestion
 
 
@@ -22,6 +23,8 @@ class Window(QMainWindow):
         self.init_ui()
 
         self.num_question = 0
+
+        self.config = Config.load_from_yml(configs_folder_path / "app_config.yml")
 
         self.set_question()
 
@@ -168,7 +171,7 @@ class Window(QMainWindow):
         self.validate_choices(self.sub_question_1_choices)
         self.validate_choices(self.sub_question_2_choices)
         self.explanation_label.show()
-        self.buttons.setCurrentWidget(self.close_button if self.num_question >= 3 else self.next_button)
+        self.buttons.setCurrentWidget(self.close_button if self.num_question >= self.config.nb_questions else self.next_button)
 
 
 def main():
